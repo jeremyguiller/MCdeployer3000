@@ -1,3 +1,5 @@
+import os
+import shutil
 from fastapi import FastAPI, HTTPException
 import docker
 from pydantic import BaseModel
@@ -5,6 +7,9 @@ from typing import Optional, List
 
 app = FastAPI()
 client = docker.from_env()
+
+# Chemin du dossier ServerData
+SERVER_DATA_DIR = os.path.join(os.getcwd(), "ServerData")
 
 # Modèle Pydantic pour les variables d'environnement
 class MinecraftServerConfig(BaseModel):
@@ -90,7 +95,17 @@ class MinecraftServerConfig(BaseModel):
 @app.post("/create-server/")
 async def create_server(config: MinecraftServerConfig):
     try:
+        # Créer le dossier ServerData s'il n'existe pas
+        os.makedirs(SERVER_DATA_DIR, exist_ok=True)
+
+        # Chemin du dossier local pour ce serveur
+        data_dir = os.path.join(SERVER_DATA_DIR, config.server_name)
+        os.makedirs(data_dir, exist_ok=True)
+
+        # Convertir les mods en une chaîne séparée par des sauts de ligne si spécifiés
         mods_str = "\n".join(config.mods) if config.mods else None
+
+        # Préparer les variables d'environnement
         environment = {
             key.upper(): str(value)
             for key, value in config.model_dump(exclude={"server_name", "port"}).items()
@@ -98,11 +113,14 @@ async def create_server(config: MinecraftServerConfig):
         }
         if mods_str:
             environment['MODS'] = mods_str
+
+        # Créer un conteneur Minecraft avec le dossier /data mappé
         container = client.containers.run(
             image=f"itzg/minecraft-server:{config.version}",
             name=config.server_name,
             ports={'25565/tcp': config.port},
             environment=environment,
+            volumes={data_dir: {'bind': '/data', 'mode': 'rw'}},  # Mapper le dossier /data
             detach=True,
             stdin_open=True,
             tty=True,
@@ -112,6 +130,11 @@ async def create_server(config: MinecraftServerConfig):
     except docker.errors.ImageNotFound:
         raise HTTPException(status_code=404, detail=f"Minecraft server image for version {config.version} not found")
     except docker.errors.APIError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # En cas d'erreur, supprimer le dossier créé
+        if os.path.exists(data_dir):
+            shutil.rmtree(data_dir)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-servers/")
@@ -160,13 +183,24 @@ async def restart_server(server_name: str):
 @app.post("/delete-server/{server_name}")
 async def delete_server(server_name: str):
     try:
+        # Récupérer le conteneur
         container = client.containers.get(server_name)
+
+        # Arrêter et supprimer le conteneur
         container.stop()
-        container.remove()
+        container.remove(v=True)  # Supprimer les volumes associés
+
+        # Supprimer le dossier local dans ServerData
+        data_dir = os.path.join(SERVER_DATA_DIR, server_name)
+        if os.path.exists(data_dir):
+            shutil.rmtree(data_dir)
+
         return {"message": f"Server {server_name} deleted successfully"}
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail=f"Server {server_name} not found")
     except docker.errors.APIError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
