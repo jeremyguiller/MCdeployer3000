@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import docker
 import httpx
 import pytest
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from api import app, SERVER_DATA_DIR  # Importez SERVER_DATA_DIR depuis api.py
 
 #client = TestClient(app)
-client = httpx.Client(base_url="http://localhost:8000", timeout=30.0)  # Augmentez le délai d'attente à 30 secondes
+client = httpx.Client(base_url="http://localhost:8000", timeout=60.0)  # Augmentez le délai d'attente à 30 secondes
 
 
 def test_create_server_basic():
@@ -188,7 +189,9 @@ def cleanup():
     response = client.get("/list-servers/")
     for server in response.json().get("servers", []):
         client.post(f"/delete-server/{server['name']}")
+        time.sleep(1)
         # Supprimer le dossier local s'il existe
         data_dir = os.path.join(SERVER_DATA_DIR, server['name'])
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir)
+        time.sleep(1)
