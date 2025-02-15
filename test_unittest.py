@@ -1,11 +1,14 @@
 import os
 import shutil
 import docker
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from api import app, SERVER_DATA_DIR  # Importez SERVER_DATA_DIR depuis api.py
 
-client = TestClient(app)
+#client = TestClient(app)
+client = httpx.Client(base_url="http://localhost:8000", timeout=30.0)  # Augmentez le délai d'attente à 30 secondes
+
 
 def test_create_server_basic():
     """ Test de création d'un serveur avec les paramètres de base """

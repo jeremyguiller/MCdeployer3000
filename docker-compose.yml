@@ -4,5 +4,6 @@ services:
     build: .
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Monte le socket Docker de l'hôte
+      - ./ServerData:/app/ServerData  # Monte le dossier ServerData
     ports:
       - "8000:8000"
