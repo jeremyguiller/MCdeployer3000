@@ -1,0 +1,8 @@
+version: "3.8"
+services:
+  api:
+    build: .
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Monte le socket Docker de l'hôte
+    ports:
+      - "8000:8000"
