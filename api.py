@@ -5,8 +5,6 @@ import docker
 from pydantic import BaseModel
 from typing import Optional, List
 
-
-
 app = FastAPI()
 client = docker.from_env()
 
@@ -94,20 +92,25 @@ class MinecraftServerConfig(BaseModel):
     op_permission_level: Optional[int] = None
     allow_nether: Optional[bool] = None
 
-@app.post("/create-server/")
+@app.post("/create-server/", summary="Create a Minecraft Server", description="Create a new Minecraft server with specified configurations.")
 async def create_server(config: MinecraftServerConfig):
-    try:
-        # Créer le dossier ServerData s'il n'existe pas
-        os.makedirs(SERVER_DATA_DIR, exist_ok=True)
+    """
+    Create a new Minecraft server with specified configurations.
 
-        # Chemin du dossier local pour ce serveur
+    Args:
+        config (MinecraftServerConfig): The configuration for the Minecraft server.
+
+    Returns:
+        dict: A message indicating the server was created successfully and the container ID.
+
+    Raises:
+        HTTPException: If the server image is not found or if there is an API error.
+    """
+    try:
+        os.makedirs(SERVER_DATA_DIR, exist_ok=True)
         data_dir = os.path.join(SERVER_DATA_DIR, config.server_name)
         os.makedirs(data_dir, exist_ok=True)
-
-        # Convertir les mods en une chaîne séparée par des sauts de ligne si spécifiés
         mods_str = "\n".join(config.mods) if config.mods else None
-
-        # Préparer les variables d'environnement
         environment = {
             key.upper(): str(value)
             for key, value in config.model_dump(exclude={"server_name", "port"}).items()
@@ -115,14 +118,12 @@ async def create_server(config: MinecraftServerConfig):
         }
         if mods_str:
             environment['MODS'] = mods_str
-
-        # Créer un conteneur Minecraft avec le dossier /data mappé
         container = client.containers.run(
             image=f"itzg/minecraft-server:{config.version}",
             name=config.server_name,
             ports={'25565/tcp': config.port},
             environment=environment,
-            volumes={data_dir: {'bind': '/data', 'mode': 'rw'}},  # Mapper le dossier /data
+            volumes={data_dir: {'bind': '/data', 'mode': 'rw'}},
             detach=True,
             stdin_open=True,
             tty=True,
@@ -134,18 +135,25 @@ async def create_server(config: MinecraftServerConfig):
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        # En cas d'erreur, supprimer le dossier créé
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/list-servers/")
+@app.get("/list-servers/", summary="List All Servers", description="List all Minecraft servers, including their status and port.")
 async def list_servers():
+    """
+    List all Minecraft servers, including their status and port.
+
+    Returns:
+        dict: A list of servers with their names, IDs, status, and ports.
+
+    Raises:
+        HTTPException: If there is an API error.
+    """
     try:
         containers = client.containers.list(all=True)
         servers = []
         for c in containers:
-            # Récupérer les ports exposés par le conteneur
             ports = c.attrs["HostConfig"]["PortBindings"]
             server_port = None
             if ports and "25565/tcp" in ports:
@@ -154,14 +162,26 @@ async def list_servers():
                 "name": c.name,
                 "id": c.id,
                 "status": c.status,
-                "port": server_port  # Ajouter le port utilisé
+                "port": server_port
             })
         return {"servers": servers}
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/stop-server/{server_name}")
+@app.post("/stop-server/{server_name}", summary="Stop a Minecraft Server", description="Stop a specified Minecraft server.")
 async def stop_server(server_name: str):
+    """
+    Stop a specified Minecraft server.
+
+    Args:
+        server_name (str): The name of the server to stop.
+
+    Returns:
+        dict: A message indicating the server was stopped successfully.
+
+    Raises:
+        HTTPException: If the server is not found or if there is an API error.
+    """
     try:
         container = client.containers.get(server_name)
         container.stop()
@@ -171,8 +191,20 @@ async def stop_server(server_name: str):
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/restart-server/{server_name}")
+@app.post("/restart-server/{server_name}", summary="Restart a Minecraft Server", description="Restart a specified Minecraft server.")
 async def restart_server(server_name: str):
+    """
+    Restart a specified Minecraft server.
+
+    Args:
+        server_name (str): The name of the server to restart.
+
+    Returns:
+        dict: A message indicating the server was restarted successfully.
+
+    Raises:
+        HTTPException: If the server is not found or if there is an API error.
+    """
     try:
         container = client.containers.get(server_name)
         container.restart()
@@ -182,21 +214,27 @@ async def restart_server(server_name: str):
     except docker.errors.APIError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/delete-server/{server_name}")
+@app.post("/delete-server/{server_name}", summary="Delete a Minecraft Server", description="Delete a specified Minecraft server and its associated data.")
 async def delete_server(server_name: str):
+    """
+    Delete a specified Minecraft server and its associated data.
+
+    Args:
+        server_name (str): The name of the server to delete.
+
+    Returns:
+        dict: A message indicating the server was deleted successfully.
+
+    Raises:
+        HTTPException: If the server is not found or if there is an API error.
+    """
     try:
-        # Récupérer le conteneur
         container = client.containers.get(server_name)
-
-        # Arrêter et supprimer le conteneur
         container.stop()
-        container.remove(v=True)  # Supprimer les volumes associés
-
-        # Supprimer le dossier local dans ServerData
+        container.remove(v=True)
         data_dir = os.path.join(SERVER_DATA_DIR, server_name)
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir)
-
         return {"message": f"Server {server_name} deleted successfully"}
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail=f"Server {server_name} not found")
